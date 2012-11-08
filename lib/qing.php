@@ -21,6 +21,9 @@ defined('APP') || define('APP', realpath('../app') . DS);
 
 // tmp 临时目录
 defined('TMP') || define('TMP', ROOT . 'tmp' . DS);
+if (!file_exists(TMP)) {
+    @mkdir(TMP);
+}
 
 // 移除全局变量
 ini_get('register_globals')
