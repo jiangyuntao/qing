@@ -59,29 +59,6 @@ function boot($app = '../app', $subdir = '') {
         : (isset($_SERVER['ORIG_PATH_INFO']) ? $_SERVER['ORIG_PATH_INFO'] : '/');
     registry('request', $request);
 
-    clear_tmp();
-    if (file_exists(TMP . 'routes' . EXT)) {
-        $routes = require TMP . 'routes' . EXT;
-    } else {
-        $routes = array();
-        foreach (glob(APP . '*') as $app) {
-            if (file_exists($app . DS . 'routes' . EXT)) {
-                $routes = array_merge($routes, include($app . DS . 'routes' . EXT));
-            }
-        }
-        //file_put_contents(TMP . 'routes' . EXT, compress_php_src(array_to_string($routes)));
-    }
-
-    foreach ($routes as $key => $value) {
-        $handler = array();
-        $name = '';
-        if (strpos($value, ':') !== false) {
-            list($name, $value) = explode(':', $value);
-        }
-        list($handler['app'], $handler['controller'], $handler['action']) = explode(',', $value);
-        $router->map($key, $handler, array('name' => $name));
-    }
-
     $target = $router->match($request);
 
     dispatch($target);
