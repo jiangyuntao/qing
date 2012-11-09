@@ -49,6 +49,7 @@ if (get_magic_quotes_gpc()) {
  * @return void
  */
 function boot($app = '../app', $subdir = '') {
+    import('lib.route');
     import('lib.router');
 
     $router = registry('router', new Router());
@@ -56,20 +57,50 @@ function boot($app = '../app', $subdir = '') {
     $request = isset($_SERVER['PATH_INFO'])
         ? $_SERVER['PATH_INFO']
         : (isset($_SERVER['ORIG_PATH_INFO']) ? $_SERVER['ORIG_PATH_INFO'] : '/');
+    registry('request', $request);
 
-    $handler = $router->match($request);
+    clear_tmp();
+    if (file_exists(TMP . 'routes' . EXT)) {
+        $routes = require TMP . 'routes' . EXT;
+    } else {
+        $routes = array();
+        foreach (glob(APP . '*') as $app) {
+            if (file_exists($app . DS . 'routes' . EXT)) {
+                $routes = array_merge($routes, include($app . DS . 'routes' . EXT));
+            }
+        }
+        //file_put_contents(TMP . 'routes' . EXT, compress_php_src(array_to_string($routes)));
+    }
 
-    dispatch($handler);
+    foreach ($routes as $key => $value) {
+        $handler = array();
+        $name = '';
+        if (strpos($value, ':') !== false) {
+            list($name, $value) = explode(':', $value);
+        }
+        list($handler['app'], $handler['controller'], $handler['action']) = explode(',', $value);
+        $router->map($key, $handler, array('name' => $name));
+    }
+
+    $target = $router->match($request);
+
+    dispatch($target);
     dump(elapsed());
 }
 
 /**
  * 调度请求
  *
- * @param mixed $handler 
+ * @param mixed $target
  * @return void
  */
-function dispatch($handler = null) {
+function dispatch($target = null) {
+    dump(registry('request'));
+    if ($target) {
+        $_GET = array_merge($_GET, $target->getParameters());
+        dump($_GET);
+    } else {
+    }
 }
 
 /**
@@ -127,9 +158,9 @@ function import($alias = null) {
  * @param mixed $alias
  * @return string
  */
-function url($alias = null, $params = array()) {
+function url($routeName = null, $params = array()) {
     $router = registry('router');
-    return $router->generateUrl($alias, $params);
+    return $router->generate($routeName, $params);
 }
 
 function elapsed() {
@@ -206,6 +237,15 @@ function dump($var = null) {
  */
 function h($string = '', $flags = ENT_COMPAT, $charset = 'ISO-8859-1', $double_encode = true) {
     return htmlspecialchars($string, $flags, $charset, $double_encode);
+}
+
+/**
+ * 清空 TMP 临时目录
+ *
+ * @return void
+ */
+function clear_tmp() {
+    return @array_map('unlink', glob(TMP . '*'));
 }
 
 /**

@@ -1,142 +1,161 @@
 <?php
+// hack from https://github.com/dannyvankooten/PHP-Router
 class Router {
-    private $_routes = array();
+    /**
+     * Array that holds all Route objects
+     * @var array
+     */ 
+    private $routes = array();
 
-    public function __construct() {
-        $this->_routes = $this->_getRoutes();
+    /**
+     * Array to store named routes in, used for reverse routing.
+     * @var array 
+     */
+    private $namedRoutes = array();
+
+    /**
+     * The base REQUEST_URI. Gets prepended to all route url's.
+     * @var string
+     */
+    private $basePath = '';
+
+    /**
+     * Set the base url - gets prepended to all route url's.
+     * @param string $base_url 
+     */
+    public function setBasePath($basePath) {
+        $this->basePath = (string) $basePath;
     }
 
-    public function match($request = '') {
-        foreach ($this->_routes as $route => $handler) {
-            // Check for a wildcard (matches all)
-            $route = null;
-            $regex = false;
-            $j = 0;
-            $n = isset($_route[0]) ? $_route[0] : null;
-            $i = 0;
+    /**
+     * Route factory method
+     *
+     * Maps the given URL to the given target.
+     * @param string $routeUrl string
+     * @param mixed $target The target of this route. Can be anything. You'll have to provide your own method to turn *      this into a filename, controller / action pair, etc..
+     * @param array $args Array of optional arguments.
+     */
+    public function map($routeUrl, $target = '', array $args = array()) {
+        $route = new Route();
 
-            // Find the longest non-regex substring and match it against the URI
-            while (true) {
-                if (!isset($_route[$i])) {
-                    break;
-                } elseif (false === $regex) {
-                    $c = $n;
-                    $regex = $c === '[' || $c === '(' || $c === '.';
-                    if (false === $regex && false !== isset($_route[$i+1])) {
-                        $n = $_route[$i + 1];
-                        $regex = $n === '?' || $n === '+' || $n === '*' || $n === '{';
-                    }
-                    if (false === $regex && $c !== '/' && (!isset($requestUrl[$j]) || $c !== $requestUrl[$j])) {
-                        continue 2;
-                    }
-                    $j++;
-                }
-                $route .= $_route[$i++];
-            }
+        $route->setUrl($this->basePath . $routeUrl);
 
-            $regex = $this->_compileRoute($route);
-            $match = preg_match($regex, $request, $params);
+        $route->setTarget($target);
 
-            if(($match == true || $match > 0)) {
+        if(isset($args['methods'])) {
+            $methods = explode(',', $args['methods']);
+            $route->setMethods($methods);
+        }
 
-                if($params) {
-                    foreach($params as $key => $value) {
-                        if(is_numeric($key)) unset($params[$key]);
-                    }
-                }
+        if(isset($args['filters'])) {
+            $route->setFilters($args['filters']);
+        }
 
-                return array(
-                    'target' => $target,
-                    'params' => $params,
-                    'name' => $name
-                );
+        if(isset($args['name'])) {
+            $route->setName($args['name']);
+            if (!isset($this->namedRoutes[$route->getName()])) {
+                $this->namedRoutes[$route->getName()] = $route;
             }
         }
+
+        $this->routes[] = $route;
+    }
+
+    /**
+     * Matches the current request against mapped routes
+     */
+    public function matchCurrentRequest() {
+        $requestMethod = (isset($_POST['_method']) && ($_method = strtoupper($_POST['_method'])) && in_array($_method,array('PUT','DELETE'))) ? $_method : $_SERVER['REQUEST_METHOD'];
+        $requestUrl = $_SERVER['REQUEST_URI'];
+
+        // strip GET variables from URL
+        if(($pos = strpos($requestUrl, '?')) !== false) {
+            $requestUrl =  substr($requestUrl, 0, $pos);
+        }
+
+        return $this->match($requestUrl, $requestMethod);
+    }
+
+    /**
+     * Match given request url and request method and see if a route has been defined for it
+     * If so, return route's target
+     * If called multiple times
+     */
+    public function match($requestUrl, $requestMethod = 'GET') {
+
+        foreach($this->routes as $route) {
+
+            // compare server request method with route's allowed http methods
+            if(!in_array($requestMethod, $route->getMethods())) continue;
+
+            // check if request url matches route regex. if not, return false.
+            if (!preg_match("@^".$route->getRegex()."*$@i", $requestUrl, $matches)) continue;
+
+            $params = array();
+
+            /**
+            if (preg_match_all("/:([\w-]+)/", $route->getUrl(), $argument_keys)) {
+            /**/
+            if (preg_match_all("~<(\w+):?(.*?)?>~", $route->getUrl(), $argument_keys)) {
+                $filters = array();
+                foreach ($argument_keys[2] as $k => $v) {
+                    $filters[$argument_keys[1][$k]] = $v;
+                }
+                $route->setFilters($filters);
+
+                // grab array with matches
+                $argument_keys = $argument_keys[1];
+
+                // loop trough parameter names, store matching value in $params array
+                foreach ($argument_keys as $key => $name) {
+                    if (isset($matches[$key + 1]))
+                        $params[$name] = $matches[$key + 1];
+                }
+
+            }
+
+            $route->setParameters($params);
+
+            return $route;
+
+        }
+
         return false;
-
     }
 
-    public function generateUrl($alias = null, $params = array()) {
-        // Check if named route exists
-        if(!isset($this->namedRoutes[$routeName])) {
-            throw new \Exception("Route '{$routeName}' does not exist.");
-        }
 
-        // Replace named parameters
+
+    /**
+     * Reverse route a named route
+     * 
+     * @param string $route_name The name of the route to reverse route.
+     * @param array $params Optional array of parameters to use in URL
+     * @return string The url to the route
+     */
+    public function generate($routeName, array $params = array()) {
+        // Check if route exists
+        if (!isset($this->namedRoutes[$routeName]))
+            throw new Exception("No route with the name $routeName has been found.");
+
         $route = $this->namedRoutes[$routeName];
-        $url = $route;
+        $url = $route->getUrl();
 
-        if (preg_match_all('`(/|\.|)\[([^:\]]*+)(?::([^:\]]*+))?\](\?|)`', $route, $matches, PREG_SET_ORDER)) {
+        // replace route url with given parameters
+        //if ($params && preg_match_all("/:(\w+)/", $url, $param_keys)) {
+        if ($params && preg_match_all("~<(\w+):?(.*?)?>~", $url, $param_keys)) {
 
-            foreach($matches as $match) {
-                list($block, $pre, $type, $param, $optional) = $match;
+            // grab array with matches
+            $param_keys = $param_keys[1];
 
-                if ($pre) {
-                    $block = substr($block, 1);
-                }
-
-                if(isset($params[$param])) {
-                    $url = str_replace($block, $params[$param], $url);
-                } elseif ($optional) {
-                    $url = str_replace($block, '', $url);
-                }
+            // loop trough parameter names, store matching value in $params array
+            foreach ($param_keys as $i => $key) {
+                if (isset($params[$key]))
+                    //$url = preg_replace("/:(\w+)/", $params[$key], $url, 1);
+                    $url = preg_replace("~<(\w+):?(.*?)?>~", $params[$key], $url, 1);
             }
-
-
         }
 
         return $url;
     }
 
-    private function _compileRoutes($routes = array()) {
-        foreach ($routes as $route => $handler) {
-            if (strpos($route, '(') === false) {
-                $routes["~" . $route . "~"] = $handler;
-            } else {
-            }
-            list($block, $pre, $type, $param, $optional) = $match;
-
-            if (isset($match_types[$type])) {
-                $type = $match_types[$type];
-            }
-            if ($pre === '.') {
-                $pre = '\.';
-            }
-
-            //Older versions of PCRE require the 'P' in (?P<named>)
-            $pattern = '(?:'
-                . ($pre !== '' ? $pre : null)
-                . '('
-                . ($param !== '' ? "?P<$param>" : null)
-                . $type
-                . '))'
-                . ($optional !== '' ? '?' : null);
-
-            $route = str_replace($block, $pattern, $route);
-        }
-        return "`^$route$`";
-    }
-
-
-    /**
-     * 从配置文件获取路由
-     *
-     * @access private 
-     * @return array
-     */
-    function _getRoutes() {
-        if (file_exists(TMP . 'routes' . EXT)) {
-            $routes = require TMP . 'routes' . EXT;
-        } else {
-            $routes = array();
-            foreach (glob(APP . '*') as $app) {
-                if (file_exists($app . DS . 'routes' . EXT)) {
-                    $routes = array_merge($routes, include($app . DS . 'routes' . EXT));
-                }
-            }
-            file_put_contents(TMP . 'routes' . EXT, compress_php_src(array_to_string($routes)));
-        }
-
-        return $this->_compileRoutes($routes);
-    }
 }
